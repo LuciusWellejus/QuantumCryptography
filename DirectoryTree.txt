@@ -1,0 +1,6 @@
+quantum-talk-app/
+├── .gitignore
+├── README.md
+├── QuantumTalk.sln               <-- The main .NET Solution file
+├── LICENSE
+├── src/
