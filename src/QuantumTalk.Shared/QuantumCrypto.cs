@@ -5,6 +5,7 @@ namespace QuantumCryptography.Shared
 {
     public static class QuantumCrypto
     {
+        // Fælles krypteringsmetode til rå bytes
         public static byte[] EncryptBytes(byte[] plainBytes, byte[] key)
         {
             byte[] nonce = new byte[12];
@@ -23,6 +24,7 @@ namespace QuantumCryptography.Shared
             return payload;
         }
 
+        // Fælles dekrypteringsmetode til rå bytes
         public static byte[] DecryptBytes(byte[] payload, byte[] key)
         {
             byte[] nonce = new byte[12];
