@@ -4,3 +4,12 @@ quantum-talk-app/
 ├── QuantumTalk.sln               <-- The main .NET Solution file
 ├── LICENSE
 ├── src/
+│   ├── QuantumTalk.Shared/       <-- Shared ML-KEM & Cryptography logic
+│   │   └── QuantumCrypto.cs
+│   │   └── QuantumTalk.Shared.csproj
+│   ├── QuantumTalk.Server/       <-- Home Server Console/Service app
+│   │   └── Program.cs (TcpListener)
+│   │   └── QuantumTalk.Server.csproj
+│   └── QuantumTalk.Client/       <-- MacBook App (Console or GUI)
+│       └── Program.cs (TcpClient)
+│       └── QuantumTalk.Client.csproj
