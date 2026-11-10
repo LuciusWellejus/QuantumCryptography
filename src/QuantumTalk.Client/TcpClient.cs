@@ -45,36 +45,88 @@ namespace QuantumCryptography.Client
             byte[] aesKey = new byte[32];
             Array.Copy(sharedSecret, aesKey, 32);
 
-            Console.WriteLine("Type your messages or code below (Press Ctrl+C to exit):");
+            Console.WriteLine("\n[READY] Type a message, or type '/file <path>' to transmit a file (Ctrl+C to exit):");
             while (true)
             {
                 Console.Write("> ");
-                string message = Console.ReadLine();
-                if (string.IsNullOrEmpty(message)) continue;
+                string input = Console.ReadLine();
+                if (string.IsNullOrEmpty(input)) continue;
 
-                // Encrypt payload using AES-GCM
-                byte[] encryptedPayload = EncryptMessage(message, aesKey);
+                // Check if user is issuing the secure file upload command
+                if (input.StartsWith("/file "))
+                {
+                    string filePath = input.Substring(6).Trim();
+                    SendFileSecurely(filePath, stream, aesKey);
+                }
+                else
+                {
+                    // Treat as standard chat/code message string
+                    // Prefixed with an indicator '0' byte so the server knows it's pure text
+                    byte[] plainTextBytes = Encoding.UTF8.GetBytes(input);
+                    byte[] textPayload = new byte[1 + plainTextBytes.Length];
+                    textPayload[0] = 0; // Type 0 = Text Message
+                    Array.Copy(plainTextBytes, 0, textPayload, 1, plainTextBytes.Length);
 
-                // Write the size of payload first, followed by payload
+                    byte[] encryptedPayload = EncryptBytes(textPayload, aesKey);
+
+                    // Transmit length header followed by encrypted payload block
+                    byte[] lengthBuffer = BitConverter.GetBytes(encryptedPayload.Length);
+                    stream.Write(lengthBuffer, 0, 4);
+                    stream.Write(encryptedPayload, 0, encryptedPayload.Length);
+                    stream.Flush();
+                }
+            }
+        }
+
+        private static void SendFileSecurely(string filePath, NetworkStream stream, byte[] aesKey)
+        {
+            if (!File.Exists(filePath))
+            {
+                Console.WriteLine("[ERROR] Specified file target does not exist locally.");
+                return;
+            }
+
+            try
+            {
+                string fileName = Path.GetFileName(filePath);
+                byte[] fileNameBytes = Encoding.UTF8.GetBytes(fileName);
+                byte[] fileDataBytes = File.ReadAllBytes(filePath);
+
+                // Build Packet Structure: [Type Byte (1=File)] + [Name Length (4B)] + [Filename] + [Content Payload]
+                byte[] unencryptedPayload = new byte[1 + 4 + fileNameBytes.Length + fileDataBytes.Length];
+                unencryptedPayload[0] = 1; // Type 1 = File Transfer
+                Array.Copy(BitConverter.GetBytes(fileNameBytes.Length), 0, unencryptedPayload, 1, 4);
+                Array.Copy(fileNameBytes, 0, unencryptedPayload, 5, fileNameBytes.Length);
+                Array.Copy(fileDataBytes, 0, unencryptedPayload, 5 + fileNameBytes.Length, fileDataBytes.Length);
+
+                // Quantum-safe AES-GCM encryption envelope
+                byte[] encryptedPayload = EncryptBytes(unencryptedPayload, aesKey);
+
+                // Send sizing indicator block then pipeline the transaction data
                 byte[] lengthBuffer = BitConverter.GetBytes(encryptedPayload.Length);
                 stream.Write(lengthBuffer, 0, 4);
                 stream.Write(encryptedPayload, 0, encryptedPayload.Length);
                 stream.Flush();
+
+                Console.WriteLine($"[MACBOOK] Securely dispatched: '{fileName}' ({fileDataBytes.Length} bytes).");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[ERROR] Failed to compile and ship file: {ex.Message}");
             }
         }
 
-        private static byte[] EncryptMessage(string plainText, byte[] key)
+        private static byte[] EncryptBytes(byte[] plainBytes, byte[] key)
         {
-            byte[] plainBytes = Encoding.UTF8.GetBytes(plainText);
             byte[] nonce = new byte[12];
-            RandomNumberGenerator.Fill(nonce); // Generate a unique nonce per transmission
+            RandomNumberGenerator.Fill(nonce);
             byte[] tag = new byte[16];
             byte[] ciphertext = new byte[plainBytes.Length];
 
             using AesGcm aesGcm = new AesGcm(key, 16);
             aesGcm.Encrypt(nonce, plainBytes, ciphertext, tag);
 
-            // Package it as: [ 12-byte Nonce ] [ 16-byte Tag ] [ Variable Ciphertext ]
+            // Output format payload envelope matching Server parsing expectations
             byte[] payload = new byte[12 + 16 + ciphertext.Length];
             Array.Copy(nonce, 0, payload, 0, 12);
             Array.Copy(tag, 0, payload, 12, 16);
