@@ -49,7 +49,6 @@ namespace QuantumCryptography.Server
             Console.WriteLine("[SERVER] Quantum Handshake Successful. Channel is secure.");
 
             // 5. Enter Safe Messaging Loop
-            // We derive a 32-byte key from our quantum secret for AES-256
             byte[] aesKey = new byte[32];
             Array.Copy(sharedSecret, aesKey, 32);
 
@@ -57,29 +56,63 @@ namespace QuantumCryptography.Server
             {
                 while (true)
                 {
-                    // Read encrypted incoming message length
+                    // Read encrypted incoming message length header
                     byte[] lengthBuffer = new byte[4];
                     if (stream.Read(lengthBuffer, 0, 4) == 0) break;
                     int cipherLength = BitConverter.ToInt32(lengthBuffer, 0);
 
-                    // Read the payload (Nonce + Ciphertext + Tag)
+                    // Read the full payload package (Nonce + Ciphertext + Tag)
                     byte[] encryptedPayload = new byte[cipherLength];
-                    stream.Read(encryptedPayload, 0, cipherLength);
+                    int totalRead = 0;
+                    while (totalRead < cipherLength)
+                    {
+                        int read = stream.Read(encryptedPayload, totalRead, cipherLength - totalRead);
+                        if (read == 0) throw new Exception("Stream cut short during transaction.");
+                        totalRead += read;
+                    }
 
-                    // Decrypt using standard AES-GCM
-                    string decryptedMessage = DecryptMessage(encryptedPayload, aesKey);
-                    Console.WriteLine($"\n[RECEIVED CODE/MSG]:\n{decryptedMessage}");
+                    // Decrypt the raw payload back to unencrypted bytes
+                    byte[] decryptedBytes = DecryptBytes(encryptedPayload, aesKey);
+
+                    // Read the Type Byte marker (Index 0)
+                    byte payloadType = decryptedBytes[0];
+
+                    if (payloadType == 0)
+                    {
+                        // Handle Type 0: Pure Text / Source Code message
+                        string message = Encoding.UTF8.GetString(decryptedBytes, 1, decryptedBytes.Length - 1);
+                        Console.WriteLine($"\n[RECEIVED MSG/CODE]:\n{message}");
+                    }
+                    else if (payloadType == 1)
+                    {
+                        // Handle Type 1: Incoming File Stream
+                        int fileNameLength = BitConverter.ToInt32(decryptedBytes, 1);
+                        string fileName = Encoding.UTF8.GetString(decryptedBytes, 5, fileNameLength);
+
+                        int fileDataOffset = 5 + fileNameLength;
+                        int fileDataLength = decryptedBytes.Length - fileDataOffset;
+                        byte[] fileData = new byte[fileDataLength];
+                        Array.Copy(decryptedBytes, fileDataOffset, fileData, 0, fileDataLength);
+
+                        // Save the file safely into a local directory
+                        string saveDirectory = Path.Combine(Environment.CurrentDirectory, "ReceivedFiles");
+                        Directory.CreateDirectory(saveDirectory);
+                        string savePath = Path.Combine(saveDirectory, fileName);
+                        File.WriteAllBytes(savePath, fileData);
+
+                        Console.WriteLine($"\n[RECEIVED FILE]: '{fileName}' saved safely ({fileDataLength} bytes).");
+                        Console.WriteLine($"Location: {savePath}");
+                    }
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[SERVER] Connection closed: {ex.Message}");
+                Console.WriteLine($"[SERVER] Connection lost or closed: {ex.Message}");
             }
         }
 
-        private static string DecryptMessage(byte[] payload, byte[] key)
+        private static byte[] DecryptBytes(byte[] payload, byte[] key)
         {
-            // Extract the 12-byte Nonce, 16-byte Tag, and variable Ciphertext
             byte[] nonce = new byte[12];
             byte[] tag = new byte[16];
             byte[] ciphertext = new byte[payload.Length - 28];
@@ -92,7 +125,7 @@ namespace QuantumCryptography.Server
             using AesGcm aesGcm = new AesGcm(key, 16);
             aesGcm.Decrypt(nonce, ciphertext, tag, decryptedBytes);
 
-            return Encoding.UTF8.GetString(decryptedBytes);
+            return decryptedBytes;
         }
     }
 }
